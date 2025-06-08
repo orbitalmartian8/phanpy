@@ -22,6 +22,7 @@ const {
   PHANPY_CLIENT_NAME: CLIENT_NAME,
   PHANPY_APP_ERROR_LOGGING: ERROR_LOGGING,
   PHANPY_REFERRER_POLICY: REFERRER_POLICY,
+  PHANPY_DEV,
 } = loadEnv('production', process.cwd(), allowedEnvPrefixes);
 
 const now = new Date();
@@ -63,7 +64,7 @@ export default defineConfig({
       // Force use Babel instead of ESBuild due to this change: https://github.com/preactjs/preset-vite/pull/114
       // Else, a bug will happen with importing variables from import.meta.env
       babel: {
-        plugins: ['macros'],
+        plugins: ['@lingui/babel-plugin-lingui-macro'],
       },
     }),
     lingui(),
@@ -126,7 +127,7 @@ export default defineConfig({
         short_name: CLIENT_NAME,
         description: 'Minimalistic opinionated Mastodon web client',
         // https://github.com/cheeaun/phanpy/issues/231
-        // theme_color: '#ffffff',
+        theme_color: undefined,
         icons: [
           {
             src: 'logo-192.png',
@@ -161,6 +162,7 @@ export default defineConfig({
     Sonda({
       detailed: true,
       brotli: true,
+      open: false,
     }),
   ],
   build: {
@@ -189,7 +191,28 @@ export default defineConfig({
           }
           return 'assets/[name]-[hash].js';
         },
+        assetFileNames: (assetInfo) => {
+          const { originalFileNames } = assetInfo;
+          if (originalFileNames?.[0]?.includes('assets/sandbox')) {
+            return 'assets/sandbox/[name]-[hash].[ext]';
+          }
+          return 'assets/[name]-[hash].[ext]';
+        },
       },
+      plugins: [
+        {
+          name: 'exclude-sandbox',
+          generateBundle(_, bundle) {
+            if (!PHANPY_DEV) {
+              Object.entries(bundle).forEach(([name, chunk]) => {
+                if (name.includes('sandbox')) {
+                  delete bundle[name];
+                }
+              });
+            }
+          },
+        },
+      ],
     },
   },
 });

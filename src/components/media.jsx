@@ -4,6 +4,7 @@ import { Fragment } from 'preact';
 import { memo } from 'preact/compat';
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -92,6 +93,7 @@ function Media({
   altIndex,
   checkAspectRatio = true,
   onClick,
+  autoplay = false,
 }) {
   let {
     id,
@@ -335,6 +337,26 @@ function Media({
     [mediaVTN, showOriginal, onClick],
   );
 
+  // Prevent media session lingering after unmount
+  useEffect(() => {
+    return () => {
+      const mediaElements =
+        parentRef.current?.querySelectorAll?.('video, audio');
+      if (mediaElements) {
+        mediaElements.forEach((el) => {
+          try {
+            el.pause();
+            el.src = '';
+            el.load();
+          } catch (e) {}
+        });
+      }
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'none';
+      }
+    };
+  }, []);
+
   if (isImage) {
     // Note: type: unknown might not have width/height
     quickPinchZoomProps.containerProps.style.display = 'inherit';
@@ -564,7 +586,7 @@ function Media({
         data-orientation="${orientation}"
         style="view-transition-name: ${mediaVTN}"
         preload="auto"
-        autoplay
+        ${autoplay ? 'autoplay' : ''}
         playsinline
         ${loopable ? 'loop' : ''}
         controls
@@ -780,11 +802,16 @@ function Media({
                 preload="metadata"
                 controls
                 controlsList="nofullscreen"
-                autoPlay
+                autoPlay={autoplay}
                 playsInline
               />
             ) : (
-              <audio src={remoteUrl || url} preload="none" controls autoPlay />
+              <audio
+                src={remoteUrl || url}
+                preload="none"
+                controls
+                autoPlay={autoplay}
+              />
             )
           ) : previewUrl ? (
             <img

@@ -245,6 +245,7 @@ function Timeline({
 }) {
   const { t } = useLingui();
   const snapStates = useSnapshot(states);
+  const autoHideBars = snapStates.settings.autoHideBars;
   const [items, setItems] = useState([]);
   const [uiState, setUIState] = useState('start');
   const [showMore, setShowMore] = useState(false);
@@ -269,7 +270,10 @@ function Timeline({
           const ts = (loadItemsTS.current = Date.now());
           let { done, value } = await fetchItems(firstLoad);
           if (ts !== loadItemsTS.current) return;
-          if (Array.isArray(value)) {
+          if (done) {
+            // Iterator has completed (no more pages)
+            setShowMore(false);
+          } else if (Array.isArray(value)) {
             // Avoid grouping for pinned posts
             const [pinnedPosts, otherPosts] = value.reduce(
               (acc, item) => {
@@ -302,7 +306,9 @@ function Timeline({
             if (!value.length) done = true;
             setShowMore(!done);
           } else {
-            setShowMore(false);
+            // Iterator returned unexpected data type
+            console.warn('Unexpected iterator result', { done, value });
+            throw new Error('Timeline load failed');
           }
           setUIState('default');
           __BENCHMARK.end(`timeline-${id}-load`);
@@ -363,7 +369,8 @@ function Timeline({
   const scrollFnCallback = useCallback(
     ({ scrollDirection, nearReachStart, reachStart }) => {
       if (headerRef.current) {
-        const hiddenUI = scrollDirection === 'end' && !nearReachStart;
+        const hiddenUI =
+          autoHideBars && scrollDirection === 'end' && !nearReachStart;
         headerRef.current.hidden = hiddenUI;
       }
       setNearReachStart(nearReachStart);
@@ -371,7 +378,7 @@ function Timeline({
         loadItems(true);
       }
     },
-    [setNearReachStart, loadItems],
+    [setNearReachStart, loadItems, autoHideBars],
   );
   const { resetScrollDirection } = useScrollFn(
     {
@@ -700,26 +707,16 @@ export const TimelineItem = memo(
         const filteredItemsIDs = new Set();
         // Here, we don't hide filtered posts, but we sort them last
         fItems.sort((a, b) => {
-          // if (a._filtered && !b._filtered) {
-          //   return 1;
-          // }
-          // if (!a._filtered && b._filtered) {
-          //   return -1;
-          // }
           const aFiltered = isFiltered(a.filtered, filterContext);
           const bFiltered = isFiltered(b.filtered, filterContext);
-          if (aFiltered && aFiltered?.action !== 'blur') {
-            filteredItemsIDs.add(a.id);
-          }
-          if (bFiltered && bFiltered?.action !== 'blur') {
-            filteredItemsIDs.add(b.id);
-          }
-          if (aFiltered && !bFiltered) {
-            return 1;
-          }
-          if (!aFiltered && bFiltered) {
-            return -1;
-          }
+          const aShouldSort = aFiltered && aFiltered.action !== 'blur';
+          const bShouldSort = bFiltered && bFiltered.action !== 'blur';
+
+          if (aShouldSort) filteredItemsIDs.add(a.id);
+          if (bShouldSort) filteredItemsIDs.add(b.id);
+
+          if (aShouldSort && !bShouldSort) return 1;
+          if (!aShouldSort && bShouldSort) return -1;
           return 0;
         });
 

@@ -30,6 +30,7 @@ import getTranslateTargetLanguage from '../utils/get-translate-target-language';
 import getHTMLText from '../utils/getHTMLText';
 import haptics from '../utils/haptics';
 import htmlContentLength from '../utils/html-content-length';
+import isSameURL from '../utils/is-same-url';
 import localeMatch from '../utils/locale-match';
 import mem from '../utils/mem';
 import niceDateTime from '../utils/nice-date-time';
@@ -54,6 +55,7 @@ import visibilityIconsMap from '../utils/visibility-icons-map';
 import visibilityText from '../utils/visibility-text';
 
 import Avatar from './avatar';
+import CollectionCard from './collection-card';
 import CustomEmoji from './custom-emoji';
 import EmojiText from './emoji-text';
 import Icon from './icon';
@@ -87,6 +89,7 @@ import TranslationBlock from './translation-block';
 
 const SHOW_COMMENT_COUNT_LIMIT = 280;
 const INLINE_TRANSLATE_LIMIT = 140;
+const MAX_COLLECTIONS = 4;
 
 const accountQueue = new PQueue({
   concurrency: 1,
@@ -457,6 +460,7 @@ function Status({
     editedAt,
     filtered,
     card,
+    taggedCollections,
     createdAt,
     inReplyToId,
     inReplyToAccountId,
@@ -2063,6 +2067,19 @@ function Status({
       ? forceShowQuoteCount(quotesCount)
       : forceShowQuoteCount && quotesCount > 0;
 
+  const collectionsWithCard = useMemo(() => {
+    const tc = taggedCollections ?? [];
+    const cardUrl = card?.url;
+    const matchIndex = tc.findIndex((c) => isSameURL(c.url, cardUrl));
+
+    if (matchIndex === -1) return [];
+
+    const matched = tc[matchIndex];
+    const others = tc.filter((_, i) => i !== matchIndex);
+
+    return [matched, ...others].slice(0, MAX_COLLECTIONS);
+  }, [taggedCollections, card?.url]);
+
   return (
     <StatusParent>
       {showReplyParent && !!(inReplyToId && inReplyToAccountId) && (
@@ -2138,9 +2155,9 @@ function Status({
             onClose={(e) => {
               setIsContextMenuOpen(false);
               // statusRef.current?.focus?.();
-              if (e?.reason === 'click') {
-                statusRef.current?.closest('[tabindex]')?.focus?.();
-              }
+              // if (e?.reason === 'click') {
+              //   statusRef.current?.closest('[tabindex]')?.focus?.();
+              // }
             }}
             portal={{
               target: document.body,
@@ -2247,7 +2264,7 @@ function Status({
             href={accountURL}
             tabindex="-1"
             // target="_blank"
-            title={`@${acct}`}
+            title={`@${punycode.toUnicode(acct)}`}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -2756,13 +2773,26 @@ function Status({
                   collapsed={!isSizeLarge && !withinContext}
                   fallbackQuote={quote}
                 />
-                {!!card &&
-                  /^https/i.test(card?.url) &&
-                  !sensitive &&
-                  !spoilerText &&
-                  !poll &&
+                {!poll &&
                   !mediaAttachments.length &&
-                  !snapStates.statusQuotes[sKey] && (
+                  !snapStates.statusQuotes[sKey] &&
+                  (collectionsWithCard.length ? (
+                    <div class="collections-container">
+                      {collectionsWithCard.map((collection) => (
+                        <CollectionCard
+                          key={collection.id}
+                          collection={collection}
+                          instance={currentInstance}
+                          creatorAccount={
+                            collection.accountId === accountId
+                              ? status.account
+                              : undefined
+                          }
+                          size={size}
+                        />
+                      ))}
+                    </div>
+                  ) : !!card && /^https/i.test(card?.url) ? (
                     <StatusCard
                       card={card}
                       selfReferential={
@@ -2773,7 +2803,24 @@ function Status({
                       )}
                       instance={currentInstance}
                     />
-                  )}
+                  ) : taggedCollections?.length ? (
+                    <div class="collections-container">
+                      {/* Limit to 4, for now. */}
+                      {taggedCollections.slice(0, 4).map((collection) => (
+                        <CollectionCard
+                          key={collection.id}
+                          collection={collection}
+                          instance={currentInstance}
+                          creatorAccount={
+                            collection.accountId === accountId
+                              ? status.account
+                              : undefined
+                          }
+                          size={size}
+                        />
+                      ))}
+                    </div>
+                  ) : null)}
                 {size !== 's' && <StatusTags tags={tags} content={content} />}
               </>
             )}

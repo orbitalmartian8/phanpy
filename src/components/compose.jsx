@@ -5,6 +5,7 @@ import { Trans, useLingui } from '@lingui/react/macro';
 import { MenuDivider, MenuItem } from '@szhsin/react-menu';
 import { deepEqual } from 'fast-equals';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import punycode from 'punycode/';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { uid } from 'uid/single';
 import { useSnapshot } from 'valtio';
@@ -969,8 +970,8 @@ function Compose({
   const mediaButtonDisabled =
     uiState === 'loading' ||
     (maxMediaAttachments !== undefined &&
-      mediaAttachments.length >= maxMediaAttachments) ||
-    !!poll; /* ||
+      mediaAttachments.length >= maxMediaAttachments); /* ||
+    !!poll ||
     !!currentQuoteStatus?.id; */
 
   const cwButtonDisabled = uiState === 'loading' || !!sensitive;
@@ -983,8 +984,8 @@ function Compose({
 
   // If maxOptions is not defined or defined and is greater than 1, show poll button
   const showPollButton = maxOptions == null || maxOptions > 1;
-  const pollButtonDisabled =
-    uiState === 'loading' || !!poll || !!mediaAttachments.length; /* ||
+  const pollButtonDisabled = uiState === 'loading' || !!poll; /* ||
+    !!mediaAttachments.length ||
     !!currentQuoteStatus?.id; */
   const onPollButtonClick = () => {
     setPoll({
@@ -1218,7 +1219,9 @@ function Compose({
               {replyToStatusMonthsAgo > 0 ? (
                 <Trans>
                   Replying to @
-                  {replyToStatus.account.acct || replyToStatus.account.username}
+                  {replyToStatus.account.acct
+                    ? punycode.toUnicode(replyToStatus.account.acct)
+                    : replyToStatus.account.username}
                   &rsquo;s post (
                   <strong>
                     {rtf.format(-replyToStatusMonthsAgo, 'month')}
@@ -1228,7 +1231,9 @@ function Compose({
               ) : (
                 <Trans>
                   Replying to @
-                  {replyToStatus.account.acct || replyToStatus.account.username}
+                  {replyToStatus.account.acct
+                    ? punycode.toUnicode(replyToStatus.account.acct)
+                    : replyToStatus.account.username}
                   &rsquo;s post
                 </Trans>
               )}

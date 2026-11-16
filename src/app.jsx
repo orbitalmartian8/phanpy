@@ -24,7 +24,6 @@ import './utils/toast-alert';
 
 import BackgroundService from './components/background-service';
 import ComposeButton from './components/compose-button';
-import { ICONS } from './components/ICONS';
 import KeyboardShortcutsHelp from './components/keyboard-shortcuts-help';
 import Loader from './components/loader';
 import Modals from './components/modals';
@@ -70,6 +69,7 @@ import {
 import { getAccessToken } from './utils/auth';
 import { AuthProvider, useAuth } from './utils/auth-context';
 import focusDeck from './utils/focus-deck';
+import { initSubscription } from './utils/push-notifications';
 import states, { hideAllModals, initStates, statusKey } from './utils/states';
 import store from './utils/store';
 import {
@@ -182,23 +182,6 @@ setInterval(
   },
   15 * 60 * 1000,
 );
-
-// Preload icons
-// There's probably a better way to do this
-// Related: https://github.com/vitejs/vite/issues/10600
-setTimeout(() => {
-  for (const icon in ICONS) {
-    setTimeout(() => {
-      if (Array.isArray(ICONS[icon])) {
-        ICONS[icon][0]?.();
-      } else if (typeof ICONS[icon] === 'object') {
-        ICONS[icon].module?.();
-      } else {
-        ICONS[icon]?.();
-      }
-    }, 1);
-  }
-}, 5000);
 
 (() => {
   window.__IDLE__ = true;
@@ -358,6 +341,11 @@ subscribe(states, (changes) => {
       const $body = document.body;
       $body.classList.toggle('cloak', value);
     }
+
+    // Add/Remove lowercase class to body
+    if (path.join('.') === 'settings.lowercasePostText') {
+      document.body.classList.toggle('lowercase-post-text', value);
+    }
   }
 });
 
@@ -411,6 +399,17 @@ const isPWA =
   window.matchMedia('(display-mode: standalone)').matches ||
   window.navigator.standalone === true;
 const PATH_RESTORE_TIME_LIMIT = 1 * 60 * 60 * 1000; // 1 hour, should be good enough
+
+// One-shot params, don't restore them
+function stripNotificationParams(path) {
+  const i = path.indexOf('?');
+  if (i === -1) return path;
+  const params = new URLSearchParams(path.slice(i + 1));
+  params.delete('id');
+  params.delete('access_token');
+  const query = params.toString();
+  return query ? `${path.slice(0, i)}?${query}` : path.slice(0, i);
+}
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
@@ -570,6 +569,13 @@ function App() {
 
   useEffect(focusDeck, [location, isLoggedIn]);
 
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    initSubscription().catch((err) => {
+      console.warn('🔔 Failed to init subscription', err);
+    });
+  }, [isLoggedIn]);
+
   // Save last page for PWA restoration
   const restoredRef = useRef(false);
   const lastPathKey = 'pwaLastPath';
@@ -580,8 +586,12 @@ function App() {
       if (isRootPath(location.pathname)) {
         store.local.del(lastPathKey);
       } else {
+        const path =
+          location.pathname === '/notifications'
+            ? stripNotificationParams(location.pathname + location.search)
+            : location.pathname + location.search;
         store.local.setJSON(lastPathKey, {
-          path: location.pathname + location.search,
+          path,
           lastAccessed: Date.now(),
         });
       }
@@ -601,7 +611,10 @@ function App() {
             const timeSinceLastAccess =
               Date.now() - (lastPath.lastAccessed || 0);
             if (timeSinceLastAccess < PATH_RESTORE_TIME_LIMIT) {
-              window.location.hash = lastPath.path;
+              const path = lastPath.path.startsWith('/notifications')
+                ? stripNotificationParams(lastPath.path)
+                : lastPath.path;
+              window.location.hash = path;
             }
           }
           store.local.del(lastPathKey);

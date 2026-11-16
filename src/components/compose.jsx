@@ -214,6 +214,8 @@ function Compose({
 
   const textareaRef = useRef();
   const spoilerTextRef = useRef();
+  const filePickerInputRef = useRef(null);
+  const cameraCaptureInputRef = useRef(null);
 
   const [visibility, setVisibility] = useState('public');
   const [quoteApprovalPolicy, setQuoteApprovalPolicy] = useState('public');
@@ -316,13 +318,11 @@ function Compose({
   };
 
   const handlePastedLink = async (url) => {
+    // Clear stale quote suggestion (e.g. when the new paste fails to unfurl)
+    setQuoteSuggestion(null);
+
     // Handle QP links
     if (supportsNativeQuote()) {
-      // Quotes cannot coexist with media attachments or polls
-      if (mediaAttachments.length > 0 || poll) {
-        return;
-      }
-
       // Cannot add/remove/replace current quote when editing
       if (editStatus) {
         return;
@@ -408,7 +408,7 @@ function Compose({
   const lastFocusedEmojiFieldRef = useRef(null);
   const focusLastFocusedField = () => {
     setTimeout(() => {
-      if (!lastFocusedFieldRef.current) return;
+      if (!lastFocusedFieldRef.current?.isConnected) return;
       lastFocusedFieldRef.current.focus();
     }, 0);
   };
@@ -416,17 +416,18 @@ function Compose({
   useEffect(() => {
     const handleFocus = (e) => {
       // Toggle focused if in or out if any fields are focused
-      composeContainerRef.current.classList.toggle(
-        'focused',
-        e.type === 'focusin',
-      );
+      // Prefer e.currentTarget over composeContainerRef.current because
+      // the ref may already be nulled during unmount when focusout fires.
+      // Keep the ref as fallback in case the event is ever retargeted.
+      const container = e.currentTarget ?? composeContainerRef.current;
+      container?.classList.toggle('focused', e.type === 'focusin');
 
       const target = e.target;
-      if (target.hasAttribute('data-allow-custom-emoji')) {
+      if (target?.hasAttribute?.('data-allow-custom-emoji')) {
         lastFocusedEmojiFieldRef.current = target;
       }
       const isFormElement = ['INPUT', 'BUTTON', 'SELECT', 'TEXTAREA'].includes(
-        target.tagName,
+        target?.tagName,
       );
       if (isFormElement) {
         lastFocusedFieldRef.current = target;
@@ -844,8 +845,24 @@ function Compose({
           }
         : null,
     };
+    // Compare drafts by metadata only, without the heavy fileData/file bytes.
+    // When fileData is present, url is a local object URL — exclude it to
+    // avoid false inequality from unique-per-call blob URLs.
+    const backgroundDraftLight = {
+      ...backgroundDraft,
+      draftStatus: {
+        ...backgroundDraft.draftStatus,
+        mediaAttachments: backgroundDraft.draftStatus.mediaAttachments?.map(
+          (attachment) => {
+            const { fileData, file, ...metadata } = attachment;
+            if (fileData) delete metadata.url;
+            return metadata;
+          },
+        ),
+      },
+    };
     if (
-      !deepEqual(backgroundDraft, prevBackgroundDraft.current) &&
+      !deepEqual(backgroundDraftLight, prevBackgroundDraft.current) &&
       !canClose()
     ) {
       console.debug('not equal', backgroundDraft, prevBackgroundDraft.current);
@@ -861,7 +878,7 @@ function Compose({
         .catch((e) => {
           console.error('DRAFT failed', key, e);
         });
-      prevBackgroundDraft.current = structuredClone(backgroundDraft);
+      prevBackgroundDraft.current = structuredClone(backgroundDraftLight);
     }
   };
   useInterval(saveUnsavedDraft, 5000); // background save every 5s
@@ -1017,13 +1034,15 @@ function Compose({
   useThrottledResizeObserver({
     ref: addSubToolbarRef,
     box: 'border-box',
-    onResize: ({ width }) => {
+    onResize: ({ width } = {}) => {
       // If scrollable, it's truncated
-      const { scrollWidth } = addSubToolbarRef.current;
+      const el = addSubToolbarRef.current;
+      if (!el) return;
+      const { scrollWidth } = el;
       const truncated = scrollWidth > width;
       const overTruncated = width < BUTTON_WIDTH * 4;
       setShowAddButton(overTruncated || truncated);
-      addSubToolbarRef.current.hidden = overTruncated;
+      el.hidden = overTruncated;
     },
   });
 
@@ -1105,7 +1124,10 @@ function Compose({
                     onClose();
                   }}
                 >
-                  <Icon icon="popout" alt={t`Pop out`} />
+                  <Icon icon="popout" size="s" />{' '}
+                  <span>
+                    <Trans>Pop out</Trans>
+                  </span>
                 </button>
               )}
               <button
@@ -1113,7 +1135,10 @@ function Compose({
                 class="plain4 min-button"
                 onClick={onMinimize}
               >
-                <Icon icon="minimize" alt={t`Minimize`} />
+                <Icon icon="minimize" size="s" />{' '}
+                <span>
+                  <Trans>Minimize</Trans>
+                </span>
               </button>{' '}
               <button
                 type="button"
@@ -1130,85 +1155,90 @@ function Compose({
             </span>
           ) : (
             hasOpener && (
-              <button
-                type="button"
-                class="light pop-button"
-                disabled={uiState === 'loading'}
-                onClick={() => {
-                  // If there are non-ID media attachments (not yet uploaded), show confirmation dialog because they are not going to be passed to the new window
-                  // const containNonIDMediaAttachments =
-                  //   mediaAttachments.length > 0 &&
-                  //   mediaAttachments.some((media) => !media.id);
-                  // if (containNonIDMediaAttachments) {
-                  //   const yes = confirm(
-                  //     'You have media attachments that are not yet uploaded. Opening a new window will discard them and you will need to re-attach them. Are you sure you want to continue?',
-                  //   );
-                  //   if (!yes) {
-                  //     return;
-                  //   }
-                  // }
+              <span class="compose-controls">
+                <button
+                  type="button"
+                  class="light pop-button"
+                  disabled={uiState === 'loading'}
+                  onClick={() => {
+                    // If there are non-ID media attachments (not yet uploaded), show confirmation dialog because they are not going to be passed to the new window
+                    // const containNonIDMediaAttachments =
+                    //   mediaAttachments.length > 0 &&
+                    //   mediaAttachments.some((media) => !media.id);
+                    // if (containNonIDMediaAttachments) {
+                    //   const yes = confirm(
+                    //     'You have media attachments that are not yet uploaded. Opening a new window will discard them and you will need to re-attach them. Are you sure you want to continue?',
+                    //   );
+                    //   if (!yes) {
+                    //     return;
+                    //   }
+                    // }
 
-                  if (!window.opener) {
-                    alert(t`Looks like you closed the parent window.`);
-                    return;
-                  }
-
-                  if (window.opener.__STATES__.showCompose) {
-                    if (window.opener.__STATES__.composerState?.publishing) {
-                      alert(
-                        t`Looks like you already have a compose field open in the parent window and currently publishing. Please wait for it to be done and try again later.`,
-                      );
+                    if (!window.opener) {
+                      alert(t`Looks like you closed the parent window.`);
                       return;
                     }
 
-                    let confirmText = t`Looks like you already have a compose field open in the parent window. Popping in this window will discard the changes you made in the parent window. Continue?`;
-                    const yes = confirm(confirmText);
-                    if (!yes) return;
-                  }
+                    if (window.opener.__STATES__.showCompose) {
+                      if (window.opener.__STATES__.composerState?.publishing) {
+                        alert(
+                          t`Looks like you already have a compose field open in the parent window and currently publishing. Please wait for it to be done and try again later.`,
+                        );
+                        return;
+                      }
 
-                  // const mediaAttachmentsWithIDs = mediaAttachments.filter(
-                  //   (media) => media.id,
-                  // );
+                      let confirmText = t`Looks like you already have a compose field open in the parent window. Popping in this window will discard the changes you made in the parent window. Continue?`;
+                      const yes = confirm(confirmText);
+                      if (!yes) return;
+                    }
 
-                  onClose({
-                    fn: () => {
-                      const passData = {
-                        editStatus,
-                        replyToStatus,
-                        replyMode,
-                        draftStatus: {
-                          uid: UID.current,
-                          status: textareaRef.current.value,
-                          spoilerText: spoilerTextRef.current.value,
-                          visibility,
-                          language,
-                          sensitive,
-                          sensitiveMedia,
-                          poll,
-                          mediaAttachments,
-                          scheduledAt,
-                        },
-                        quoteStatus: currentQuoteStatus,
-                      };
-                      window.opener.__COMPOSE__ = passData; // Pass it here instead of `showCompose` due to some weird proxy issue again
-                      if (window.opener.__STATES__.showCompose) {
-                        window.opener.__STATES__.showCompose = false;
-                        setTimeout(() => {
+                    // const mediaAttachmentsWithIDs = mediaAttachments.filter(
+                    //   (media) => media.id,
+                    // );
+
+                    onClose({
+                      fn: () => {
+                        const passData = {
+                          editStatus,
+                          replyToStatus,
+                          replyMode,
+                          draftStatus: {
+                            uid: UID.current,
+                            status: textareaRef.current.value,
+                            spoilerText: spoilerTextRef.current.value,
+                            visibility,
+                            language,
+                            sensitive,
+                            sensitiveMedia,
+                            poll,
+                            mediaAttachments,
+                            scheduledAt,
+                          },
+                          quoteStatus: currentQuoteStatus,
+                        };
+                        window.opener.__COMPOSE__ = passData; // Pass it here instead of `showCompose` due to some weird proxy issue again
+                        if (window.opener.__STATES__.showCompose) {
+                          window.opener.__STATES__.showCompose = false;
+                          setTimeout(() => {
+                            window.opener.__STATES__.showCompose = true;
+                          }, 10);
+                        } else {
                           window.opener.__STATES__.showCompose = true;
-                        }, 10);
-                      } else {
-                        window.opener.__STATES__.showCompose = true;
-                      }
-                      if (window.opener.__STATES__.composerState.minimized) {
-                        // Maximize it
-                        window.opener.__STATES__.composerState.minimized = false;
-                      }
-                    },
-                  });
-                }}
-              >
-                <Icon icon="popin" alt={t`Pop in`} />
-              </button>
+                        }
+                        if (window.opener.__STATES__.composerState.minimized) {
+                          // Maximize it
+                          window.opener.__STATES__.composerState.minimized = false;
+                        }
+                      },
+                    });
+                  }}
+                >
+                  <Icon icon="popin" size="s" />{' '}
+                  <span>
+                    <Trans>Pop in</Trans>
+                  </span>
+                </button>
+              </span>
             )
           )}
         </div>
@@ -1742,6 +1772,22 @@ function Compose({
             onCancel={() => setQuoteSuggestion(null)}
           />
           <div class="toolbar compose-footer">
+            {supportsCameraCapture && (
+              <CameraCaptureInput
+                ref={cameraCaptureInputRef}
+                supportedMimeTypes={supportedImagesVideosTypes}
+                disabled={mediaButtonDisabled}
+                setMediaAttachments={setMediaAttachments}
+              />
+            )}
+            <FilePickerInput
+              ref={filePickerInputRef}
+              supportedMimeTypes={supportedMimeTypes}
+              maxMediaAttachments={maxMediaAttachments}
+              mediaAttachments={mediaAttachments}
+              disabled={mediaButtonDisabled}
+              setMediaAttachments={setMediaAttachments}
+            />
             <span class="add-toolbar-button-group spacer">
               {showAddButton && (
                 <Menu2
@@ -1767,33 +1813,19 @@ function Compose({
                   {supportsCameraCapture && (
                     <MenuItem
                       disabled={mediaButtonDisabled}
-                      className="compose-menu-add-media"
+                      onClick={() => {
+                        cameraCaptureInputRef.current?.click();
+                      }}
                     >
-                      <label class="compose-menu-add-media-field">
-                        <CameraCaptureInput
-                          hidden
-                          supportedMimeTypes={supportedImagesVideosTypes}
-                          disabled={mediaButtonDisabled}
-                          setMediaAttachments={setMediaAttachments}
-                        />
-                      </label>
                       <Icon icon="camera" /> <span>{_(ADD_LABELS.camera)}</span>
                     </MenuItem>
                   )}
                   <MenuItem
                     disabled={mediaButtonDisabled}
-                    className="compose-menu-add-media"
+                    onClick={() => {
+                      filePickerInputRef.current?.click();
+                    }}
                   >
-                    <label class="compose-menu-add-media-field">
-                      <FilePickerInput
-                        hidden
-                        supportedMimeTypes={supportedMimeTypes}
-                        maxMediaAttachments={maxMediaAttachments}
-                        mediaAttachments={mediaAttachments}
-                        disabled={mediaButtonDisabled}
-                        setMediaAttachments={setMediaAttachments}
-                      />
-                    </label>
                     <Icon icon="media" /> <span>{_(ADD_LABELS.media)}</span>
                   </MenuItem>
                   <MenuItem
@@ -1852,26 +1884,25 @@ function Compose({
                 hidden
               >
                 {supportsCameraCapture && (
-                  <label class="toolbar-button">
-                    <CameraCaptureInput
-                      supportedMimeTypes={supportedImagesVideosTypes}
-                      mediaAttachments={mediaAttachments}
-                      disabled={mediaButtonDisabled}
-                      setMediaAttachments={setMediaAttachments}
-                    />
-                    <Icon icon="camera" alt={_(ADD_LABELS.camera)} />
-                  </label>
-                )}
-                <label class="toolbar-button">
-                  <FilePickerInput
-                    supportedMimeTypes={supportedMimeTypes}
-                    maxMediaAttachments={maxMediaAttachments}
-                    mediaAttachments={mediaAttachments}
+                  <button
+                    type="button"
+                    class="toolbar-button"
                     disabled={mediaButtonDisabled}
-                    setMediaAttachments={setMediaAttachments}
-                  />
+                    onClick={() => cameraCaptureInputRef.current?.click()}
+                    title={_(ADD_LABELS.camera)}
+                  >
+                    <Icon icon="camera" alt={_(ADD_LABELS.camera)} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  class="toolbar-button"
+                  disabled={mediaButtonDisabled}
+                  onClick={() => filePickerInputRef.current?.click()}
+                  title={t`Add media`}
+                >
                   <Icon icon="media" alt={_(ADD_LABELS.media)} />
-                </label>
+                </button>
                 <button
                   type="button"
                   class="toolbar-button"
@@ -1955,7 +1986,7 @@ function Compose({
               <label
                 class={`toolbar-button ${highlightQuoteApprovalPolicyField ? 'highlight' : ''}`}
               >
-                <Icon icon="quote2" alt="Quote settings" />
+                <Icon icon="quote2" alt={t`Quote settings`} />
                 {quoteApprovalPolicy === 'followers' && (
                   <Icon icon="group" class="insignificant" />
                 )}

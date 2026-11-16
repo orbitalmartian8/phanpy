@@ -4,6 +4,7 @@ import { useLayoutEffect, useState } from 'preact/hooks';
 import { useSnapshot } from 'valtio';
 
 import { api } from '../utils/api';
+import { handlePushSubscriptionChange } from '../utils/push-notifications';
 import states from '../utils/states';
 import {
   getAccountByAccessToken,
@@ -18,17 +19,32 @@ import Notification from './notification';
 
 {
   if ('serviceWorker' in navigator) {
-    console.log('👂👂👂 Listen to message');
-    navigator.serviceWorker.addEventListener('message', (event) => {
+    const handleMessage = (event) => {
       console.log('💥💥💥 Message event', event);
-      const { type, id, accessToken } = event?.data || {};
+      const { type, id, accessToken, oldEndpoint, newSubscription } =
+        event?.data || {};
       if (type === 'notification') {
+        if (!id) return;
         states.routeNotification = {
           id,
           accessToken,
         };
+      } else if (type === 'pushsubscriptionchange') {
+        if (!getCurrentAccount()) return;
+        handlePushSubscriptionChange({ oldEndpoint, newSubscription }).catch(
+          (err) => {
+            console.warn('🔔 Failed to handle push subscription change', err);
+          },
+        );
       }
-    });
+    };
+    navigator.serviceWorker.addEventListener('message', handleMessage);
+
+    if (import.meta.hot) {
+      import.meta.hot.dispose(() => {
+        navigator.serviceWorker.removeEventListener('message', handleMessage);
+      });
+    }
   }
 }
 
@@ -45,80 +61,97 @@ export default memo(function NotificationService() {
   const [showNotificationSheet, setShowNotificationSheet] = useState(false);
 
   useLayoutEffect(() => {
-    if (!id || !accessToken) return;
-    const { instance: currentInstance } = api();
-    const { masto, instance } = api({
-      accessToken,
-    });
-    console.log('API', { accessToken, currentInstance, instance });
-    const sameInstance = currentInstance === instance;
+    if (!id) return;
+
+    // Stale token makes api() throw, so bail early
     const account = accessToken
       ? getAccountByAccessToken(accessToken)
       : getCurrentAccount();
+    if (!account) {
+      console.warn('🛎️ Notification account not found', id);
+      states.routeNotification = null;
+      return;
+    }
+
+    let currentInstance;
+    let masto;
+    let instance;
+    try {
+      ({ instance: currentInstance } = api());
+      // No token, use current account
+      ({ masto, instance } = accessToken ? api({ accessToken }) : api());
+    } catch (err) {
+      console.warn('🛎️ Failed to init notification client', err);
+      states.routeNotification = null;
+      return;
+    }
+
+    console.log('API', { accessToken, currentInstance, instance });
+    const sameInstance = currentInstance === instance;
+
+    let canceled = false;
     (async () => {
-      const notification = await masto.v1.notifications.$select(id).fetch();
-      if (notification && account) {
-        console.log('🛎️ Notification', { id, notification, account });
-        const accountInstance = account.instanceURL;
-        const { type, status, account: notificationAccount } = notification;
-        const hasModal = !!document.querySelector('#modal-container > *');
-        const isFollow = type === 'follow' && !!notificationAccount?.id;
-        const hasAccount = !!notificationAccount?.id;
-        const hasStatus = !!status?.id;
-        if (isFollow && sameInstance) {
-          // Show account sheet, can handle different instances
-          states.showAccount = {
-            account: notificationAccount,
-            instance: accountInstance,
-          };
-        } else if (hasModal || !sameInstance || (hasAccount && hasStatus)) {
-          // Show sheet of notification, if
-          // - there is a modal open
-          // - the notification is from another instance
-          // - the notification has both account and status, gives choice for users to go to account or status
-          setShowNotificationSheet({
-            id,
-            account,
-            notification,
-            sameInstance,
-          });
-        } else {
-          if (hasStatus) {
-            // Go to status page
-            location.hash = `/${currentInstance}/s/${status.id}`;
-          } else if (isFollow) {
-            // Go to profile page
-            location.hash = `/${currentInstance}/a/${notificationAccount.id}`;
+      try {
+        const notification = await masto.v1.notifications.$select(id).fetch();
+        if (canceled) return;
+        if (notification) {
+          console.log('🛎️ Notification', { id, notification, account });
+          const accountInstance = account.instanceURL;
+          const { type, status, account: notificationAccount } = notification;
+          const hasModal = !!document.querySelector('#modal-container > *');
+          const isFollow = type === 'follow' && !!notificationAccount?.id;
+          const hasAccount = !!notificationAccount?.id;
+          const hasStatus = !!status?.id;
+          if (isFollow && sameInstance) {
+            // Show account sheet, can handle different instances
+            states.showAccount = {
+              account: notificationAccount,
+              instance: accountInstance,
+            };
+          } else if (hasModal || !sameInstance || (hasAccount && hasStatus)) {
+            // Show sheet of notification, if
+            // - there is a modal open
+            // - the notification is from another instance
+            // - the notification has both account and status, gives choice for users to go to account or status
+            setShowNotificationSheet({
+              id,
+              account,
+              notification,
+              sameInstance,
+            });
           } else {
-            // Go to notifications page
-            location.hash = '/notifications';
+            if (hasStatus) {
+              // Go to status page
+              location.hash = `/${currentInstance}/s/${status.id}`;
+            } else if (isFollow) {
+              // Go to profile page
+              location.hash = `/${currentInstance}/a/${notificationAccount.id}`;
+            } else {
+              // Go to notifications page
+              location.hash = '/notifications';
+            }
           }
+        } else {
+          console.warn('🛎️ Notification not found', id);
         }
-      } else {
-        console.warn('🛎️ Notification not found', id);
+      } catch (err) {
+        console.warn('🛎️ Failed to fetch notification', err);
+      } finally {
+        // Clear to prevent retrigger on remount
+        if (
+          !canceled &&
+          states.routeNotification?.id === id &&
+          states.routeNotification?.accessToken === accessToken
+        ) {
+          states.routeNotification = null;
+        }
       }
     })();
-  }, [id, accessToken]);
 
-  // useLayoutEffect(() => {
-  //   // Listen to message from service worker
-  //   const handleMessage = (event) => {
-  //     console.log('💥💥💥 Message event', event);
-  //     const { type, id, accessToken } = event?.data || {};
-  //     if (type === 'notification') {
-  //       states.routeNotification = {
-  //         id,
-  //         accessToken,
-  //       };
-  //     }
-  //   };
-  //   console.log('👂👂👂 Listen to message');
-  //   navigator.serviceWorker.addEventListener('message', handleMessage);
-  //   return () => {
-  //     console.log('👂👂👂 Remove listen to message');
-  //     navigator.serviceWorker.removeEventListener('message', handleMessage);
-  //   };
-  // }, []);
+    return () => {
+      canceled = true;
+    };
+  }, [id, accessToken]);
 
   useLayoutEffect(() => {
     if (navigator?.clearAppBadge) {

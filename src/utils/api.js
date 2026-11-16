@@ -12,9 +12,13 @@ import {
   saveAccount,
   setCurrentAccountID,
 } from './store-utils';
+import { clearSupportsCache } from './supports';
 
 // Default *fallback* instance
 const DEFAULT_INSTANCE = 'mastodon.social';
+
+// NodeInfo is best-effort, don't hang init on it
+const WELL_KNOWN_TIMEOUT = 3_000;
 
 // Per-instance masto instance
 // Useful when only one account is logged in
@@ -45,7 +49,7 @@ export function initClient({ instance, accessToken }) {
   const masto = createRestAPIClient({
     url,
     accessToken, // Can be null
-    timeout: 2 * 60_000, // Unfortunately this is global instead of per-request
+    timeout: 30_000, // Unfortunately this is global instead of per-request
     mediaTimeout: 10 * 60_000,
   });
 
@@ -110,16 +114,19 @@ export async function initInstance(client, instance) {
     instances[instance.toLowerCase()] = info;
   }
   store.local.setJSON('instances', instances);
+  clearSupportsCache();
 
   let nodeInfo;
   // GoToSocial requires we get the NodeInfo to identify server type
   // spec: https://github.com/jhass/nodeinfo
   try {
     if (uri || domain) {
-      let urlBase = uri || `https://${domain}`;
-      const wellKnown = await (
-        await fetch(`${urlBase}/.well-known/nodeinfo`)
-      ).json();
+      let urlBase = uri || domain;
+      if (!/^https?:\/\//.test(urlBase)) urlBase = `https://${urlBase}`;
+      const wellKnownRes = await fetch(`${urlBase}/.well-known/nodeinfo`, {
+        signal: AbortSignal.timeout(WELL_KNOWN_TIMEOUT),
+      });
+      const wellKnown = wellKnownRes.ok ? await wellKnownRes.json() : null;
       if (Array.isArray(wellKnown?.links)) {
         const schema = 'http://nodeinfo.diaspora.software/ns/schema/';
         const nodeInfoUrl = wellKnown.links
@@ -139,7 +146,10 @@ export async function initInstance(client, instance) {
           .sort((a, b) => -compareVersions(a.version, b.version))
           .find((x) => satisfies(x.version, '<=2'))?.href;
         if (nodeInfoUrl) {
-          nodeInfo = await (await fetch(nodeInfoUrl)).json();
+          const nodeInfoRes = await fetch(nodeInfoUrl, {
+            signal: AbortSignal.timeout(WELL_KNOWN_TIMEOUT),
+          });
+          if (nodeInfoRes.ok) nodeInfo = await nodeInfoRes.json();
         }
       }
     }
@@ -149,6 +159,7 @@ export async function initInstance(client, instance) {
     nodeInfos[instance.toLowerCase()] = nodeInfo;
   }
   store.local.setJSON('nodeInfos', nodeInfos);
+  clearSupportsCache();
 
   // This is a weird place to put this but here's updating the masto instance with the streaming API URL set in the configuration
   // Reason: Streaming WebSocket URL may change, unlike the standard API REST URLs
@@ -208,7 +219,8 @@ export function setPreferences(preferences) {
 }
 
 export function hasPreferences() {
-  return !!getPreferences();
+  // getPreferences() defaults to {}, always truthy
+  return !!store.account.get('preferences');
 }
 
 // Get preferences

@@ -58,7 +58,8 @@
 ) {
   padding-top: 16px;
 }
-.only-mentions .notification:not(.notification-mention),
+.only-mentions
+  .notification:not(.notification-mention):not(.notification-quote),
 .only-mentions .timeline-empty {
   display: none;
 }
@@ -146,6 +147,10 @@
 
 .notification .status-link {
   border-radius: 8px;
+  @supports (corner-shape: squircle) {
+    border-radius: 16px;
+    corner-shape: squircle;
+  }
   border: 1px solid var(--outline-color);
   max-height: 160px;
   overflow: hidden;
@@ -187,7 +192,7 @@
   inset-inline-end: var(--inset-offset);
   color: var(--text-color);
   background-color: var(--bg-faded-color);
-  border: 1px dashed var(--link-color);
+  border: 1px solid var(--outline-color);
   box-shadow:
     0 0 0 1px var(--bg-color),
     0 -5px 10px var(--bg-color),

@@ -4,6 +4,7 @@ import { ph } from '@lingui/core/macro';
 import { Plural, Trans, useLingui } from '@lingui/react/macro';
 import { useEffect, useState } from 'preact/hooks';
 import punycode from 'punycode/';
+import { useSnapshot } from 'valtio';
 
 // import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
@@ -48,6 +49,7 @@ function AccountBlock(props) {
   const hasRelationshipProp = 'relationship' in props;
 
   const { t } = useLingui();
+  const { hideProfileMetrics } = useSnapshot(states.settings);
   const { instance: currentInstance } = api();
   const currentAccountID = getCurrentAccountID();
   const [familiarFollowers, setFamiliarFollowers] = useState([]);
@@ -115,6 +117,7 @@ function AccountBlock(props) {
   useEffect(() => {
     if (!showStats || !id || !currentAccountID || id === currentAccountID)
       return;
+    if (!hideProfileMetrics) return;
     if (!sameCurrentInstance) return;
     if (hasRelationshipProp && !relationship) return;
     const rel = relationship || {};
@@ -134,6 +137,7 @@ function AccountBlock(props) {
     };
   }, [
     showStats,
+    hideProfileMetrics,
     id,
     currentAccountID,
     sameCurrentInstance,
@@ -233,7 +237,8 @@ function AccountBlock(props) {
             {!!group && (
               <>
                 <span class="tag collapsed">
-                  <Icon icon="group" /> <Trans>Group</Trans>
+                  <Icon icon="group" />{' '}
+                  <Trans context="account type">Group</Trans>
                 </span>
               </>
             )}
@@ -251,7 +256,7 @@ function AccountBlock(props) {
                     </span>
                   ) : excludedRelationship.following ? (
                     <span class="tag minimal">
-                      <Trans>Following</Trans>
+                      <Trans context="follow state">Following</Trans>
                     </span>
                   ) : excludedRelationship.followedBy ? (
                     <span class="tag minimal">
@@ -261,49 +266,55 @@ function AccountBlock(props) {
                 </div>
               </div>
             )}
-            {((!hasRelationship && !!familiarFollowers?.length) ||
-              !!followersCount) && (
-              <span class="shazam-container-horizontal">
-                <span class="shazam-container-inner">
+            {!hideProfileMetrics &&
+              ((!hasRelationship && !!familiarFollowers?.length) ||
+                !!followersCount) && (
+                <span class="ib">
                   {!hasRelationship && !!familiarFollowers?.length && (
-                    <span class="stats-avatars-bunch">
-                      {familiarFollowers.slice(0, 3).map((follower) => (
-                        <Avatar
-                          url={follower.avatarStatic}
-                          size="s"
-                          alt={`${follower.displayName} @${follower.acct}`}
-                          squircle={follower.bot}
-                          key={follower.id}
-                        />
-                      ))}
-                    </span>
-                  )}{' '}
-                  {!!followersCount && (
-                    <span class="ib">
-                      <Plural
-                        value={followersCount}
-                        one={
-                          <Trans>
-                            <span title={followersCount}>
-                              {shortenNumber(followersCount)}
-                            </span>{' '}
-                            follower
-                          </Trans>
-                        }
-                        other={
-                          <Trans>
-                            <span title={followersCount}>
-                              {shortenNumber(followersCount)}
-                            </span>{' '}
-                            followers
-                          </Trans>
-                        }
-                      />
+                    <span class="shazam-container-horizontal">
+                      <span class="shazam-container-inner">
+                        <span class="stats-avatars-bunch">
+                          {familiarFollowers.slice(0, 3).map((follower) => (
+                            <Avatar
+                              url={follower.avatarStatic}
+                              size="s"
+                              alt={`${follower.displayName} @${follower.acct}`}
+                              squircle={follower.bot}
+                              key={follower.id}
+                            />
+                          ))}
+                        </span>
+                      </span>
                     </span>
                   )}
+                  {!!followersCount && (
+                    <>
+                      {' '}
+                      <span class="ib">
+                        <Plural
+                          value={followersCount}
+                          one={
+                            <Trans>
+                              <span title={followersCount}>
+                                {shortenNumber(followersCount)}
+                              </span>{' '}
+                              follower
+                            </Trans>
+                          }
+                          other={
+                            <Trans>
+                              <span title={followersCount}>
+                                {shortenNumber(followersCount)}
+                              </span>{' '}
+                              followers
+                            </Trans>
+                          }
+                        />
+                      </span>
+                    </>
+                  )}
                 </span>
-              </span>
-            )}
+              )}
             {!!verifiedField && (
               <span class="verified-field">
                 <Icon icon="check-circle" size="s" alt={t`Verified`} />{' '}

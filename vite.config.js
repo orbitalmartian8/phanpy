@@ -13,7 +13,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 import removeConsole from 'vite-plugin-remove-console';
 import { run } from 'vite-plugin-run';
 
-import { ALL_LOCALES } from './src/locales';
+import { ALL_LOCALES } from './src/locales.js';
 
 const allowedEnvPrefixes = ['VITE_', 'PHANPY_'];
 const { NODE_ENV } = process.env;
@@ -23,27 +23,50 @@ const {
   PHANPY_APP_ERROR_LOGGING: ERROR_LOGGING,
   PHANPY_REFERRER_POLICY: REFERRER_POLICY,
   PHANPY_DISALLOW_ROBOTS: DISALLOW_ROBOTS,
+  PHANPY_COMMIT_HASH: COMMIT_HASH,
+  PHANPY_COMMIT_TIME: COMMIT_TIME,
+  PHANPY_BUILD_TIME: BUILD_TIME,
   PHANPY_DEV,
 } = loadEnv('production', process.cwd(), allowedEnvPrefixes);
 
 const now = new Date();
+const buildTime = BUILD_TIME ? new Date(BUILD_TIME) : now;
+
 let commitHash;
 let commitTime;
 let fakeCommitHash = false;
-try {
-  const gitResult = execSync('git log -1 --format="%h %cI"').toString().trim();
-  const [hash, time] = gitResult.split(' ');
-  commitHash = hash;
-  commitTime = new Date(time);
-} catch (error) {
-  // If error, means git is not installed or not a git repo (could be downloaded instead of git cloned)
-  // Fallback to random hash which should be different on every build run 🤞
-  commitHash = uid();
-  commitTime = now;
-  fakeCommitHash = true;
+if (COMMIT_HASH && COMMIT_TIME) {
+  console.log('Using provided commit hash and timestamp');
+  commitHash = COMMIT_HASH;
+  commitTime = new Date(COMMIT_TIME);
+} else {
+  try {
+    console.log('Fetching commit hash and timestamp from Git');
+    const gitResult = execSync('git log -1 --format="%h %cI"')
+      .toString()
+      .trim();
+    const [hash, time] = gitResult.split(' ');
+    commitHash = hash;
+    commitTime = new Date(time);
+  } catch (error) {
+    // If error, means git is not installed or not a git repo (could be downloaded instead of git cloned)
+    // Fallback to random hash which should be different on every build run 🤞
+    console.log(
+      'Falling back to randomly-generated commit hash, and current timestamp',
+    );
+    commitHash = uid();
+    commitTime = now;
+    fakeCommitHash = true;
+  }
 }
+console.log(`commit hash: ${commitHash}`);
+console.log(`commit time: ${commitTime.toISOString()}`);
+console.log(`build time:  ${buildTime.toISOString()}`);
 
-let rollbarCode = fs.readFileSync(resolve(__dirname, './rollbar.js'), 'utf-8');
+let rollbarCode = fs.readFileSync(
+  resolve(import.meta.dirname, './rollbar.js'),
+  'utf-8',
+);
 rollbarCode = rollbarCode.replace('__PHANPY_COMMIT_HASH__', `'${commitHash}'`);
 
 // https://github.com/vitejs/vite/issues/9597#issuecomment-1209305107
@@ -73,7 +96,7 @@ export default defineConfig(({ command }) => {
     appType: 'mpa',
     mode: NODE_ENV,
     define: {
-      __BUILD_TIME__: JSON.stringify(now),
+      __BUILD_TIME__: JSON.stringify(buildTime),
       __COMMIT_HASH__: JSON.stringify(commitHash),
       __COMMIT_TIME__: JSON.stringify(commitTime),
       __FAKE_COMMIT_HASH__: fakeCommitHash,
@@ -86,7 +109,6 @@ export default defineConfig(({ command }) => {
         },
         // Ignore specific folders to prevent auto-refresh
         ignored: [
-          '**/src/iconify-icons/**',
           // Add folder paths here (glob patterns)
           // Example: '**/node_modules/**',
           // Example: '**/dist/**',
@@ -98,14 +120,12 @@ export default defineConfig(({ command }) => {
       preprocessorMaxWorkers: 1,
     },
     plugins: [
-      ...preact({
-        // Force use Babel instead of ESBuild due to this change: https://github.com/preactjs/preset-vite/pull/114
-        // Else, a bug will happen with importing variables from import.meta.env
-        babel: {
-          plugins: ['@lingui/babel-plugin-lingui-macro'],
-        },
-      }).filter((plugin) => !isBuild || plugin.name !== 'preact:devtools'),
-      lingui(),
+      // Has to come before preact(), else JSX macros won't be transformed
+      // https://lingui.dev/blog/2026/10/01/native-macro-transform
+      lingui({ macroTransform: true }),
+      ...preact().filter(
+        (plugin) => !isBuild || plugin.name !== 'preact:devtools',
+      ),
       run({
         silent: false,
         input: [
@@ -123,6 +143,8 @@ export default defineConfig(({ command }) => {
       }),
       removeConsole({
         includes: ['log', 'debug', 'info', 'warn', 'error'],
+        // Plugin can't parse import attributes syntax (`with { type: 'json' }`)
+        external: ['src/locales.js'],
       }),
       htmlPlugin({
         metas: [
@@ -184,7 +206,7 @@ export default defineConfig(({ command }) => {
           type: 'json',
           output: './version.json',
           data: {
-            buildTime: now,
+            buildTime,
             commitHash,
           },
         },
@@ -201,7 +223,7 @@ export default defineConfig(({ command }) => {
       {
         // https://developers.cloudflare.com/pages/configuration/early-hints/
         name: 'generate-headers',
-        writeBundle(_, bundle) {
+        writeBundle(options, bundle) {
           const cssFiles = Object.keys(bundle).filter((file) =>
             file.endsWith('.css'),
           );
@@ -209,10 +231,7 @@ export default defineConfig(({ command }) => {
             const links = cssFiles
               .map((file) => `  Link: <${file}>; rel=preload; as=style`)
               .join('\n');
-            fs.writeFileSync(
-              resolve(__dirname, 'dist/_headers'),
-              `/\n${links}`,
-            );
+            fs.writeFileSync(resolve(options.dir, '_headers'), `/\n${links}`);
           }
         },
       },
@@ -319,8 +338,8 @@ export default defineConfig(({ command }) => {
       rolldownOptions: {
         external: ['@xmldom/xmldom'], // exifreader's optional dependency, not needed
         input: {
-          main: resolve(__dirname, 'index.html'),
-          compose: resolve(__dirname, 'compose/index.html'),
+          main: resolve(import.meta.dirname, 'index.html'),
+          compose: resolve(import.meta.dirname, 'compose/index.html'),
         },
         output: {
           // NOTE: Comment this for now. This messes up async imports.
@@ -343,11 +362,18 @@ export default defineConfig(({ command }) => {
           //     return 'vendor';
           //   }
           // },
+          // Icons in own chunk for caching
+          codeSplitting: {
+            groups: [
+              {
+                name: 'icons',
+                test: /@mingcute[\\/]icons[\\/]dist[\\/]styles[\\/]/,
+                priority: 10,
+              },
+            ],
+          },
           chunkFileNames: (chunkInfo) => {
             const { facadeModuleId } = chunkInfo;
-            if (facadeModuleId && facadeModuleId.includes('icon')) {
-              return 'assets/icons/[name]-[hash].js';
-            }
             if (facadeModuleId && facadeModuleId.includes('locales')) {
               return 'assets/locales/[name]-[hash].js';
             }
@@ -380,7 +406,8 @@ export default defineConfig(({ command }) => {
               // Remove .js.map files and sourcemap references for specific chunks
               Object.keys(bundle).forEach((fileName) => {
                 const shouldRemoveSourcemap =
-                  fileName.includes('locales/') || fileName.includes('icons/');
+                  fileName.includes('locales/') ||
+                  fileName.includes('assets/icons-');
 
                 if (fileName.endsWith('.js.map') && shouldRemoveSourcemap) {
                   delete bundle[fileName];

@@ -12,6 +12,7 @@ import {
   useState,
 } from 'preact/hooks';
 import punycode from 'punycode/';
+import { useSnapshot } from 'valtio';
 
 import { api } from '../utils/api';
 import enhanceContent from '../utils/enhance-content';
@@ -135,6 +136,7 @@ function AccountInfo({
   showEndorsements = false,
 }) {
   const { i18n, t } = useLingui();
+  const { hideProfileMetrics } = useSnapshot(states.settings);
   const { masto, authenticated: currentAuthenticated } = api({
     instance,
   });
@@ -406,7 +408,7 @@ function AccountInfo({
             )}
             {isString && (
               <button type="button" onClick={reload}>
-                <Trans>Try again</Trans>
+                <Trans comment="Infinitive form">Try again</Trans>
               </button>
             )}
           </div>
@@ -732,7 +734,8 @@ function AccountInfo({
                 )}
                 {!!group && (
                   <span class="tag">
-                    <Icon icon="group" /> <Trans>Group</Trans>
+                    <Icon icon="group" />{' '}
+                    <Trans context="account type">Group</Trans>
                   </span>
                 )}
                 {/* {roles?.map((role) => (
@@ -824,25 +827,29 @@ function AccountInfo({
                           </span>
                         </span>
                       )}
-                      <Plural
-                        value={followersCount}
-                        one={
-                          <Trans>
-                            <span title={followersCount}>
-                              {shortenNumber(followersCount)}
-                            </span>{' '}
-                            Follower
-                          </Trans>
-                        }
-                        other={
-                          <Trans>
-                            <span title={followersCount}>
-                              {shortenNumber(followersCount)}
-                            </span>{' '}
-                            Followers
-                          </Trans>
-                        }
-                      />
+                      {hideProfileMetrics ? (
+                        <Trans>Followers</Trans>
+                      ) : (
+                        <Plural
+                          value={followersCount}
+                          one={
+                            <Trans>
+                              <span title={followersCount}>
+                                {shortenNumber(followersCount)}
+                              </span>{' '}
+                              Follower
+                            </Trans>
+                          }
+                          other={
+                            <Trans>
+                              <span title={followersCount}>
+                                {shortenNumber(followersCount)}
+                              </span>{' '}
+                              Followers
+                            </Trans>
+                          }
+                        />
+                      )}
                     </LinkOrDiv>
                     <LinkOrDiv
                       class="insignificant"
@@ -853,8 +860,8 @@ function AccountInfo({
                         setTimeout(() => {
                           states.showGenericAccounts = {
                             heading: t({
-                              id: 'following.stats',
                               message: 'Following',
+                              context: 'followed accounts',
                             }),
                             fetchAccounts: fetchFollowing,
                             instance,
@@ -868,17 +875,21 @@ function AccountInfo({
                         }, 0);
                       }}
                     >
-                      <Plural
-                        value={followingCount}
-                        other={
-                          <Trans>
-                            <span title={followingCount}>
-                              {shortenNumber(followingCount)}
-                            </span>{' '}
-                            Following
-                          </Trans>
-                        }
-                      />
+                      {hideProfileMetrics ? (
+                        <Trans context="followed accounts">Following</Trans>
+                      ) : (
+                        <Plural
+                          value={followingCount}
+                          other={
+                            <Trans>
+                              <span title={followingCount}>
+                                {shortenNumber(followingCount)}
+                              </span>{' '}
+                              Following
+                            </Trans>
+                          }
+                        />
+                      )}
                       <br />
                     </LinkOrDiv>
                     <LinkOrDiv
@@ -1113,6 +1124,17 @@ function AccountInfo({
                       </div>
                     </div>
                   </div>
+                )}
+                {!standalone && (
+                  <Link
+                    to={accountLink}
+                    class="button block view-profile-button"
+                  >
+                    <span>
+                      <Trans>View profile</Trans>
+                    </span>{' '}
+                    <Icon icon="arrow-right" />
+                  </Link>
                 )}
               </main>
               <footer>

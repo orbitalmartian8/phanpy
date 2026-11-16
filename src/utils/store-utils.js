@@ -95,13 +95,16 @@ export const getCurrentAcc = mem(getCurrentAccount, {
   expires: 60 * 1000, // 1 minute
 });
 
-export function getCurrentAccountNS() {
-  const account = getCurrentAccount();
+export function getAccountNS(account) {
   const {
     instanceURL,
     info: { id },
   } = account;
   return `${id}@${instanceURL}`;
+}
+
+export function getCurrentAccountNS() {
+  return getAccountNS(getCurrentAccount());
 }
 
 export function saveAccount(account) {
@@ -143,9 +146,12 @@ export function getCurrentInstance() {
   if (currentInstance) return currentInstance;
   try {
     const account = getCurrentAccount();
-    const instances = store.local.getJSON('instances');
+    const instances = store.local.getJSON('instances') || {};
     const instance = account.instanceURL.toLowerCase();
-    return (currentInstance = instances[instance]);
+    const info = instances[instance];
+    // Don't cache misses, initInstance may fill them in
+    if (info) currentInstance = info;
+    return info || {};
   } catch (e) {
     console.error(e);
     // alert(`Failed to load instance configuration. Please try again.\n\n${e}`);
@@ -163,7 +169,10 @@ export function getCurrentNodeInfo() {
     const account = getCurrentAccount();
     const nodeInfos = store.local.getJSON('nodeInfos') || {};
     const instanceURL = account.instanceURL.toLowerCase();
-    return (currentNodeInfo = nodeInfos[instanceURL] || {});
+    const info = nodeInfos[instanceURL];
+    // Don't cache misses, initInstance may fill them in
+    if (info) currentNodeInfo = info;
+    return info || {};
   } catch (e) {
     console.error(e);
     return {};

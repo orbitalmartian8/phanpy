@@ -14,7 +14,7 @@ import Icon from './icon';
 import Loader from './loader';
 import MenuConfirm from './menu-confirm';
 
-function CollectionAddEdit({ collection, onClose }) {
+function CollectionAddEdit({ collection, accountIds, onClose }) {
   const { t } = useLingui();
   const { masto } = api();
   const editMode = !!collection;
@@ -82,6 +82,7 @@ function CollectionAddEdit({ collection, onClose }) {
                     ...(language ? { language } : {}),
                     sensitive,
                     discoverable,
+                    ...(accountIds?.length ? { accountIds } : {}),
                   });
                 }
                 setUIState('default');
@@ -103,7 +104,7 @@ function CollectionAddEdit({ collection, onClose }) {
         >
           <div class="collection-form-row">
             <label for="collection-name">
-              <Trans>Name</Trans>{' '}
+              <Trans context="label">Name</Trans>{' '}
               <grapheme-input>
                 <input
                   ref={nameFieldRef}
